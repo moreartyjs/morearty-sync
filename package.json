@@ -1,0 +1,38 @@
+{
+  "name": "morearty-sync",
+  "version": "0.0.1",
+  "description": "",
+  "main": "index.js",
+  "dependencies": {
+    "react": "~0.11.2",
+    "immutable": "~2.0.17",
+    "morearty": "~0.4.0",
+    "backbone": "^1.1.2"
+  },
+  "devDependencies": {
+    "coffee-script": "^1.8.0"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "coffee -o lib/ -c src/",
+    "prepublish": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "github.com/mbektimirov/morearty-sync"
+  },
+  "keywords": [
+    "morearty",
+    "backbone",
+    "ajax",
+    "rest",
+    "react",
+    "om"
+  ],
+  "author": "Marat Bektimirov",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/mbektimirov/morearty-sync/issues"
+  },
+  "homepage": "https://github.com/mbektimirov/morearty-sync"
+}
