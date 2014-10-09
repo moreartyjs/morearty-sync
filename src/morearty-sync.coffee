@@ -214,7 +214,6 @@ MoreartySync =
   createContext: ({state, modelMapping, configuration}) ->
     Ctx = Morearty.createContext state, configuration
     Ctx._modelMap = {}
-    Ctx._modelInstances = {}
     Ctx._modelMapRegExps = []
 
     for {path, model} in modelMapping
@@ -237,11 +236,8 @@ MoreartySync =
       path = Binding.asStringPath binding._path
 
       model =
-        if m = ctx._modelInstances[path]
-          m
-        else if ModelOrCollection = ctx._modelMap[path]
-          m = new ModelOrCollection binding
-          ctx._modelInstances[path] = m
+        if ModelOrCollection = ctx._modelMap[path]
+          new ModelOrCollection binding
         else if matched = path.match /(.*)\.(\d+)/
           # check if path is a vector item: some.list.x
           [__, vectorPath, itemIndex] = matched
