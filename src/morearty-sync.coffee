@@ -8,12 +8,18 @@ defaultSync = B.sync
 isEmptyObject = (obj) ->
   Object.getOwnPropertyNames(obj).length == 0
 
+methodMap =
+  'create': 'creating'
+  'update': 'updating'
+  'patch' : 'patching'
+  'delete': 'deleting'
+  'read'  : 'reading'
 
-B.sync = (method, model, options = {}) ->
+B.sync = (method, model, @options = {}) ->
   xhr = defaultSync method, model, options
 
   if model instanceof SyncModel
-    model.set 'status', method
+    model.updateStatus method
     xhr
       .success -> model.unsetIfExists 'error'
       .fail (e, error, errorMessage) ->
@@ -21,7 +27,7 @@ B.sync = (method, model, options = {}) ->
         model.history?.undo() if options.rollback
         model.set 'error', Imm.fromJS(errorMessage || 'Unknown error')
 
-      .always -> model.unset 'status'
+      .always -> model.updateStatus null
 
 
 validateModel = (ModelOrCollectionClass, BaseClass, type) ->
@@ -55,18 +61,10 @@ class SyncModel extends B.Model
       'id':
         writeable: false
         get: ->
-          -> @get @idAttribute || 'id'
+          @get @idAttribute || 'id'
 
-      'url':
-        writeable: false
-        get: ->
-          ->
-            url = B.Model::url.call @
-            if @isNew()
-              url
-            else
-              # replace default model id with binding id
-              url.replace /(.*)\/.*/, "$1/#{encodeURIComponent @id()}"
+        set: (id) ->
+          @set(@idAttribute || 'id', id)
 
     @initialize.apply @, arguments
 
@@ -111,6 +109,16 @@ class SyncModel extends B.Model
   bindTo: (newBinding) ->
     newBinding.set @binding.val()
     @binding = newBinding
+
+  isPending: ->
+    @get('status')
+
+  updateStatus: (method) ->
+    if @options.xhrStatus
+      if method
+        @set 'status', methodMap[method]
+      else
+        @unsetIfExists 'status'
 
   _attrsAndOptions: (key, val, options) ->
     # Handle both `"key", value` and `{key: value}` -style arguments.

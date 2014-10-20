@@ -5,8 +5,8 @@
   "main": "index.js",
   "dependencies": {
     "react": "~0.11.2",
-    "immutable": "~2.0.17",
-    "morearty": "~0.4.0",
+    "morearty": "0.4.4",
+    "immutable": "~2.3.x",
     "backbone": "^1.1.2"
   },
   "devDependencies": {
