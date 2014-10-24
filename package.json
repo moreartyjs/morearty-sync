@@ -4,10 +4,11 @@
   "description": "",
   "main": "index.js",
   "dependencies": {
-    "react": "~0.11.2",
-    "morearty": "0.4.4",
-    "immutable": "~2.3.x",
-    "backbone": "^1.1.2"
+    "backbone": "^1.1.2",
+    "immutable": "~2.5.x",
+    "lodash": "^2.4.1",
+    "morearty": "0.4.7",
+    "react": "~0.11.2"
   },
   "devDependencies": {
     "coffee-script": "^1.8.0"
@@ -19,7 +20,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "github.com/mbektimirov/morearty-sync"
+    "url": "github.com/moreartyjs/morearty-sync"
   },
   "keywords": [
     "morearty",
@@ -32,7 +33,7 @@
   "author": "Marat Bektimirov",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/mbektimirov/morearty-sync/issues"
+    "url": "https://github.com/moreartyjs/morearty-sync/issues"
   },
-  "homepage": "https://github.com/mbektimirov/morearty-sync"
+  "homepage": "https://github.com/moreartyjs/morearty-sync"
 }
