@@ -1,12 +1,10 @@
+_ = require 'lodash'
 B = require 'backbone'
 Imm = require 'immutable'
 Morearty = require 'morearty'
 {Binding, History} = Morearty
 
 defaultSync = B.sync
-
-isEmptyObject = (obj) ->
-  Object.getOwnPropertyNames(obj).length == 0
 
 methodMap =
   'create': 'creating'
@@ -38,10 +36,15 @@ validateModel = (ModelOrCollectionClass, BaseClass, type) ->
 
 
 class SyncModel extends B.Model
+  defaults =
+    xhrStatus: true
+
   ###
   @param {Binding|Object} data - representing the model data. For raw object new binding will be created.
   ###
   constructor: (data, options = {}) ->
+    @options = _.extend defaults, options
+
     @binding =
       if data instanceof Binding
         data
@@ -50,7 +53,7 @@ class SyncModel extends B.Model
         # should be pointed to Vector entry when model data goes to collection.
         # The main question is: leave it as is or do not create own binding
         # for empty model and then strictly bind it to main state?
-        data = @parse(data, options) || {} if options.parse
+        data = @parse(data, @options) || {} if @options.parse
         Binding.init Imm.fromJS(data)
 
     # TODO: rewrite Morearty.History class
@@ -69,19 +72,18 @@ class SyncModel extends B.Model
     @initialize.apply @, arguments
 
   get: (key) ->
-    value = @binding.val key
-    if value instanceof Imm.Sequence then value.toJSON() else value
+    @binding.toJS key
 
   set: (key, val, options) ->
     return @ unless key
     {attrs, options} = @_attrsAndOptions key, val, options
 
     # Protect from empty merge which triggers binding listeners
-    return if isEmptyObject attrs
+    return if _.isEmpty attrs
 
     if options.unset
       tx = @binding.atomically()
-      tx = tx.delete k for k of attrs
+      tx.delete k for k of attrs
       tx.commit options.silent # should be strictly false to silent listeners
     else
       @binding.merge Imm.fromJS(attrs)
@@ -223,6 +225,7 @@ MoreartySync =
     Ctx = Morearty.createContext state, configuration
     Ctx._modelMap = {}
     Ctx._modelMapRegExps = []
+    Ctx._modelInstances = {}
 
     for {path, model} in modelMapping
       # validateModel ModelOrCollection, SyncModel, 'model'
@@ -244,8 +247,10 @@ MoreartySync =
       path = Binding.asStringPath binding._path
 
       model =
-        if ModelOrCollection = ctx._modelMap[path]
-          new ModelOrCollection binding
+        if m = ctx._modelInstances[path]
+          m
+        else if ModelOrCollection = ctx._modelMap[path]
+          ctx._modelInstances[path] = new ModelOrCollection binding
         else if matched = path.match /(.*)\.(\d+)/
           # check if path is a vector item: some.list.x
           [__, vectorPath, itemIndex] = matched
@@ -259,7 +264,7 @@ MoreartySync =
             )[0]?.model
 
           # TODO: cache it or not?
-          new MClass binding if MClass
+          ctx._modelInstances[path] = new MClass binding if MClass
 
     collection: (binding) ->
       @model binding
