@@ -3,10 +3,11 @@ B = require 'backbone'
 Imm = require 'immutable'
 Morearty = require 'morearty'
 {Binding, History} = Morearty
+linkBinding = Morearty.Callback.set
 
 defaultSync = B.sync
 
-methodMap =
+statusMap =
   'create': 'creating'
   'update': 'updating'
   'patch' : 'patching'
@@ -17,15 +18,17 @@ B.sync = (method, model, @options = {}) ->
   xhr = defaultSync method, model, options
 
   if model instanceof SyncModel
-    model.updateStatus method
+    model.setStatus 'xhr', statusMap[method]
     xhr
-      .success -> model.unsetIfExists 'error'
+      .success ->
+        # model.setStatus 'saved', true
+        model.unsetStatus 'error'
       .fail (e, error, errorMessage) ->
         # TODO: merge previous state instead of undo, 'status' and 'error' make binding dirty
         model.history?.undo() if options.rollback
-        model.set 'error', Imm.fromJS(errorMessage || 'Unknown error')
+        model.setStatus 'error', Imm.fromJS(errorMessage || 'Unknown error')
 
-      .always -> model.updateStatus null
+      .always -> model.unsetStatus 'xhr'
 
 
 validateModel = (ModelOrCollectionClass, BaseClass, type) ->
@@ -36,13 +39,11 @@ validateModel = (ModelOrCollectionClass, BaseClass, type) ->
 
 
 class SyncModel extends B.Model
-  defaults =
-    xhrStatus: true
-
   ###
   @param {Binding|Object} data - representing the model data. For raw object new binding will be created.
   ###
   constructor: (data, options = {}) ->
+    defaults = trackStatus: true
     @options = _.extend defaults, options
 
     @binding =
@@ -55,6 +56,8 @@ class SyncModel extends B.Model
         # for empty model and then strictly bind it to main state?
         data = @parse(data, @options) || {} if @options.parse
         Binding.init Imm.fromJS(data)
+
+    @modelStatusBinding = @binding.sub '__model_status'
 
     # TODO: rewrite Morearty.History class
     @_historyBinding = Binding.init()
@@ -81,28 +84,30 @@ class SyncModel extends B.Model
     # Protect from empty merge which triggers binding listeners
     return if _.isEmpty attrs
 
+    tx = @binding.atomically()
+
     if options.unset
-      tx = @binding.atomically()
       tx.delete k for k of attrs
-      tx.commit options.silent # should be strictly false to silent listeners
     else
-      @binding.merge Imm.fromJS(attrs)
+      tx.merge Imm.fromJS(attrs)
+
+    # @setStatus 'saved', false, tx
 
     # Speculative update: set first, then validate
     validationError = @validate?(@toJSON())
 
     if validationError
-      @binding.set 'validationError', Imm.fromJS(validationError)
+      @setStatus 'validationError', Imm.fromJS(validationError), tx
     else
-      @unsetIfExists 'validationError'
+      @unsetStatus 'validationError', tx
+
+    tx.commit options.silent # should be strictly false to silent listeners
 
     @
 
 
   toJSON: ->
-    json = @binding.val().toJSON()
-    delete json[k] for k in ['status', 'validationError']
-    json
+    @getCleanState().toJS()
 
   unsetIfExists: (key) ->
     @unset key if @get key
@@ -113,14 +118,24 @@ class SyncModel extends B.Model
     @binding = newBinding
 
   isPending: ->
-    @get('status')
+    @getStatus 'xhr'
 
-  updateStatus: (method) ->
-    if @options.xhrStatus
-      if method
-        @set 'status', methodMap[method]
-      else
-        @unsetIfExists 'status'
+  # TODO: add model level transaction
+  setStatus: (key, status, tx) ->
+    if @options.trackStatus
+      @_wrapTx @modelStatusBinding, 'set', key, status, tx
+
+  unsetStatus: (key, tx) ->
+    @_wrapTx @modelStatusBinding, 'delete', key, tx
+
+  getStatus: (key) ->
+    @modelStatusBinding.val key
+
+  getCleanState: (state = @binding.val()) ->
+    state.delete '__model_status'
+
+  _wrapTx: (binding, method, key, value, tx) ->
+    if tx then tx[method] key, binding, value else binding[method] key, value
 
   _attrsAndOptions: (key, val, options) ->
     # Handle both `"key", value` and `{key: value}` -style arguments.
@@ -263,11 +278,46 @@ MoreartySync =
               path.match rx.pathRegExp
             )[0]?.model
 
-          # TODO: cache it or not?
           ctx._modelInstances[path] = new MClass binding if MClass
 
     collection: (binding) ->
       @model binding
+
+    linkModel: (model, path, throughFn = _.identity) ->
+      linkBinding(
+        model.binding
+        path
+        _.compose throughFn, _.partial(@_beforeModelEdit, model)
+      )
+
+    _beforeModelEdit: (model, value) ->
+      model.setStatus 'saved', false
+      value
+
+  # TODO: need more investigation
+  BranchMixin:
+    componentWillMount: ->
+      @fork()
+
+    componentWillUnmount: ->
+      @revert()
+
+    fork: ->
+      model = @model()
+      model._stateBeforeEdit = model.binding.val()
+
+    revert: ->
+      model = @model()
+      model.binding.set model._stateBeforeEdit if !model.getStatus('saved')
+
+    saveAndMerge: ->
+      @model().save()
+      @fork()
+
+    isForkChanged: ->
+      model = @model()
+      !Imm.is(model.getCleanState(), model.getCleanState(model._stateBeforeEdit))
+
 
 
 module.exports = MoreartySync
