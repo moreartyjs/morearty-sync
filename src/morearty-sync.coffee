@@ -123,19 +123,17 @@ class SyncModel extends B.Model
   # TODO: add model level transaction
   setStatus: (key, status, tx) ->
     if @options.trackStatus
-      @_wrapTx @modelStatusBinding, 'set', key, status, tx
+      {attrs, options: tx} = @_attrsAndOptions key, status, tx
+      (if !_.isEmpty tx then tx else @modelStatusBinding).merge Imm.fromJS(attrs)
 
   unsetStatus: (key, tx) ->
-    @_wrapTx @modelStatusBinding, 'delete', key, tx
+    (if !_.isEmpty tx then tx else @modelStatusBinding).delete key
 
   getStatus: (key) ->
     @modelStatusBinding.val key
 
   getCleanState: (state = @binding.val()) ->
     state.delete '__model_status'
-
-  _wrapTx: (binding, method, key, value, tx) ->
-    if tx then tx[method] key, binding, value else binding[method] key, value
 
   _attrsAndOptions: (key, val, options) ->
     # Handle both `"key", value` and `{key: value}` -style arguments.
@@ -201,16 +199,15 @@ MoreartySync =
     collection: (binding) ->
       @model binding
 
-    linkModel: (model, path, throughFn = _.identity) ->
-      linkBinding(
-        model.binding
-        path
-        _.compose throughFn, _.partial(@_beforeModelEdit, model)
-      )
+    linkModel: (model, path, {beforeEdit, afterEdit}) ->
+      beforeEdit ||= _.identity
+      afterEdit  ||= _.noop
 
-    _beforeModelEdit: (model, value) ->
-      model.setStatus 'saved', false
-      value
+      (domEvent) ->
+        {value} = domEvent.target
+        model.binding.set path, beforeEdit(value)
+        afterEdit value
+
 
   # TODO: need more investigation
   BranchMixin:
