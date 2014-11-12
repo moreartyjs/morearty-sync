@@ -7,8 +7,8 @@
     "backbone": "^1.1.2",
     "immutable": "~2.5.x",
     "lodash": "^2.4.1",
-    "morearty": "0.4.7",
-    "react": "~0.11.2"
+    "morearty": "0.6.x",
+    "react": "~0.12.x"
   },
   "devDependencies": {
     "coffee-script": "^1.8.0"

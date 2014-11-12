@@ -18,17 +18,16 @@ B.sync = (method, model, @options = {}) ->
   xhr = defaultSync method, model, options
 
   if model instanceof SyncModel
-    model.setStatus 'xhr', statusMap[method]
+    model.setXhrStatus 'xhr', statusMap[method]
     xhr
       .success ->
-        # model.setStatus 'saved', true
-        model.unsetStatus 'error'
+        model.unsetXhrStatus 'error'
       .fail (e, error, errorMessage) ->
         # TODO: merge previous state instead of undo, 'status' and 'error' make binding dirty
         model.history?.undo() if options.rollback
-        model.setStatus 'error', Imm.fromJS(errorMessage || 'Unknown error')
+        model.setXhrStatus 'error', e.responseJSON
 
-      .always -> model.unsetStatus 'xhr'
+      .always -> model.unsetXhrStatus 'xhr'
 
 
 validateModel = (ModelOrCollectionClass, BaseClass, type) ->
@@ -43,7 +42,7 @@ class SyncModel extends B.Model
   @param {Binding|Object} data - representing the model data. For raw object new binding will be created.
   ###
   constructor: (data, options = {}) ->
-    defaults = trackStatus: true
+    defaults = trackXhrStatus: true
     @options = _.extend defaults, options
 
     @binding =
@@ -57,11 +56,9 @@ class SyncModel extends B.Model
         data = @parse(data, @options) || {} if @options.parse
         Binding.init Imm.fromJS(data)
 
-    @modelStatusBinding = @binding.sub '__model_status'
-
     # TODO: rewrite Morearty.History class
-    @_historyBinding = Binding.init()
-    @history = History.init @binding, @_historyBinding
+    # @_historyBinding = Binding.init()
+    # @history = History.init @binding, @_historyBinding
 
     Object.defineProperties @,
       'id':
@@ -101,20 +98,22 @@ class SyncModel extends B.Model
     else
       @unsetStatus 'validationError', tx
 
-    tx.commit options.silent # should be strictly false to silent listeners
+    tx.commit notify: options.silent # should be strictly false to silent listeners
 
     @
 
+  clear: (path) ->
+    @binding.clear path
 
   toJSON: ->
-    @getCleanState().toJS()
+    @binding.toJS()
 
   unsetIfExists: (key) ->
     @unset key if @get key
 
   # Write model data to the new binding and point @binding to it
   bindTo: (newBinding) ->
-    newBinding.set @binding.val()
+    newBinding.set @binding.get()
     @binding = newBinding
 
   isPending: ->
@@ -122,18 +121,22 @@ class SyncModel extends B.Model
 
   # TODO: add model level transaction
   setStatus: (key, status, tx) ->
-    if @options.trackStatus
-      {attrs, options: tx} = @_attrsAndOptions key, status, tx
-      (if !_.isEmpty tx then tx else @modelStatusBinding).merge Imm.fromJS(attrs)
+    {attrs, options: tx} = @_attrsAndOptions key, status, tx
+    (if !_.isEmpty tx then tx else @binding.meta()).merge Imm.fromJS(attrs)
 
   unsetStatus: (key, tx) ->
-    (if !_.isEmpty tx then tx else @modelStatusBinding).delete key
+    (if !_.isEmpty tx then tx else @binding.meta()).delete key
 
   getStatus: (key) ->
-    @modelStatusBinding.val key
+    @binding.meta().get key
 
-  getCleanState: (state = @binding.val()) ->
-    state.delete '__model_status'
+  setXhrStatus: (key, status) ->
+    if @options.trackXhrStatus
+      @setStatus key, status
+
+  unsetXhrStatus: (key) ->
+    if @options.trackXhrStatus
+      @unsetStatus key
 
   _attrsAndOptions: (key, val, options) ->
     # Handle both `"key", value` and `{key: value}` -style arguments.
@@ -207,32 +210,6 @@ MoreartySync =
         {value} = domEvent.target
         model.binding.set path, beforeEdit(value)
         afterEdit value
-
-
-  # TODO: need more investigation
-  BranchMixin:
-    componentWillMount: ->
-      @fork()
-
-    componentWillUnmount: ->
-      @revert()
-
-    fork: ->
-      model = @model()
-      model._stateBeforeEdit = model.binding.val()
-
-    revert: ->
-      model = @model()
-      model.binding.set model._stateBeforeEdit if !model.getStatus('saved')
-
-    saveAndMerge: ->
-      @model().save()
-      @fork()
-
-    isForkChanged: ->
-      model = @model()
-      !Imm.is(model.getCleanState(), model.getCleanState(model._stateBeforeEdit))
-
 
 
 module.exports = MoreartySync
