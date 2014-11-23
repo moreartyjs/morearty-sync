@@ -180,7 +180,7 @@ class SyncCollection extends mixOf B.Collection, SyncMixin
 
   reset: (models) ->
     @binding.clear()
-    @set models
+    @binding.set models
 
   at: (index) ->
     new @model @binding.sub(index)
