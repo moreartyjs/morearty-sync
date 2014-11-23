@@ -1,11 +1,30 @@
-_ = require 'lodash'
-B = require 'backbone'
-Imm = require 'immutable'
-Morearty = require 'morearty'
+_                  = require 'lodash'
+B                  = require 'backbone'
+Imm                = require 'immutable'
+Morearty           = require 'morearty'
 {Binding, History} = Morearty
-linkBinding = Morearty.Callback.set
+linkBinding        = Morearty.Callback.set
+imm                = Imm.fromJS
 
-defaultSync = B.sync
+mixOf = (base, mixins...) ->
+  class Mixed extends base
+  for mixin in mixins by -1 # earlier mixins override later ones
+    for name, method of mixin::
+      Mixed::[name] = method
+  Mixed
+
+# Handle both `"key", value` and `{key: value}` -style arguments.
+# (from Backbone.Model.set)
+attrsAndOptions = (key, val, options) ->
+  attrs = {}
+  if typeof key == 'object'
+    attrs = key
+    options = val
+  else
+    attrs[key] = val
+
+  attrs: attrs
+  options: options || {}
 
 statusMap =
   'create': 'creating'
@@ -14,36 +33,68 @@ statusMap =
   'delete': 'deleting'
   'read'  : 'reading'
 
-B.sync = (method, model, @options = {}) ->
-  xhr = defaultSync method, model, options
-
-  if model instanceof SyncModel
-    model.setXhrStatus 'xhr', statusMap[method]
-    xhr
-      .success ->
-        model.unsetXhrStatus 'error'
-      .fail (e, error, errorMessage) ->
-        # TODO: merge previous state instead of undo, 'status' and 'error' make binding dirty
-        model.history?.undo() if options.rollback
-        model.setXhrStatus 'error', e.responseJSON
-
-      .always -> model.unsetXhrStatus 'xhr'
-
-
 validateModel = (ModelOrCollectionClass, BaseClass, type) ->
   if ModelOrCollectionClass != BaseClass
     if !(ModelOrCollectionClass.prototype instanceof BaseClass)
       throw new Error "#{type} should be instance of #{BaseClass.name}"
 
 
+class SyncMixin
+  sharedDefaults:
+    trackXhrStatus: true
 
-class SyncModel extends B.Model
+  sync: (method, model, options = {}) ->
+    xhr = B.sync.apply @, arguments
+
+    @setXhrStatus 'xhr', statusMap[method]
+    xhr
+      .success =>
+        @unsetXhrStatus 'error'
+      .fail (e, error, errorMessage) =>
+        # TODO: merge previous state instead of undo, 'status' and 'error' make binding dirty
+        @history?.undo() if options.rollback
+        @setXhrStatus 'error', e.responseJSON
+
+      .always => @unsetXhrStatus 'xhr'
+
+  # Write model data to the new binding and point @binding to it
+  bindTo: (newBinding) ->
+    newBinding.set @binding.get()
+    @binding = newBinding
+
+  isPending: ->
+    @getStatus 'xhr'
+
+  # TODO: add model level transaction
+  setStatus: (key, status, tx) ->
+    {attrs, options: tx} = attrsAndOptions key, status, tx
+    (if !_.isEmpty tx then tx else @binding.meta()).merge imm(attrs)
+
+  unsetStatus: (key, tx) ->
+    (if !_.isEmpty tx then tx else @binding.meta()).delete key
+
+  getStatus: (key) ->
+    @binding.meta().get key
+
+  setXhrStatus: (key, status) ->
+    if @options.trackXhrStatus
+      @setStatus key, status
+
+  unsetXhrStatus: (key) ->
+    if @options.trackXhrStatus
+      @unsetStatus key
+
+  toJSON: ->
+    @binding.toJS()
+
+
+
+class SyncModel extends mixOf B.Model, SyncMixin
   ###
   @param {Binding|Object} data - representing the model data. For raw object new binding will be created.
   ###
   constructor: (data, options = {}) ->
-    defaults = trackXhrStatus: true
-    @options = _.extend defaults, options
+    @options = _.extend @sharedDefaults, options
 
     @binding =
       if data instanceof Binding
@@ -54,7 +105,7 @@ class SyncModel extends B.Model
         # The main question is: leave it as is or do not create own binding
         # for empty model and then strictly bind it to main state?
         data = @parse(data, @options) || {} if @options.parse
-        Binding.init Imm.fromJS(data)
+        Binding.init imm(data)
 
     # TODO: rewrite Morearty.History class
     # @_historyBinding = Binding.init()
@@ -76,7 +127,7 @@ class SyncModel extends B.Model
 
   set: (key, val, options) ->
     return @ unless key
-    {attrs, options} = @_attrsAndOptions key, val, options
+    {attrs, options} = attrsAndOptions key, val, options
 
     # Protect from empty merge which triggers binding listeners
     return if _.isEmpty attrs
@@ -86,7 +137,7 @@ class SyncModel extends B.Model
     if options.unset
       tx.delete k for k of attrs
     else
-      tx.merge Imm.fromJS(attrs)
+      tx.merge imm(attrs)
 
     # @setStatus 'saved', false, tx
 
@@ -94,7 +145,7 @@ class SyncModel extends B.Model
     validationError = @validate?(@toJSON())
 
     if validationError
-      @setStatus 'validationError', Imm.fromJS(validationError), tx
+      @setStatus 'validationError', imm(validationError), tx
     else
       @unsetStatus 'validationError', tx
 
@@ -105,55 +156,41 @@ class SyncModel extends B.Model
   clear: (path) ->
     @binding.clear path
 
-  toJSON: ->
-    @binding.toJS()
-
   unsetIfExists: (key) ->
     @unset key if @get key
 
-  # Write model data to the new binding and point @binding to it
-  bindTo: (newBinding) ->
-    newBinding.set @binding.get()
-    @binding = newBinding
 
-  isPending: ->
-    @getStatus 'xhr'
+# -----------------------------------------------------------------------
+class SyncCollection extends mixOf B.Collection, SyncMixin
+  model: SyncModel
 
-  # TODO: add model level transaction
-  setStatus: (key, status, tx) ->
-    {attrs, options: tx} = @_attrsAndOptions key, status, tx
-    (if !_.isEmpty tx then tx else @binding.meta()).merge Imm.fromJS(attrs)
+  constructor: (@binding, options = {}) ->
+    if !(@binding.get() instanceof Imm.List ||
+        @binding.get() instanceof Imm.Set ||
+        @binding.get() instanceof Imm.Stack)
+      throw new Error 'SyncCollection binding should point to Immutable.IndexedIterable (List, Set, etc.)'
 
-  unsetStatus: (key, tx) ->
-    (if !_.isEmpty tx then tx else @binding.meta()).delete key
+    @options = _.extend @sharedDefaults, options
+    @initialize.apply @, arguments
+    validateModel @model, SyncModel, 'SyncCollection.model'
 
-  getStatus: (key) ->
-    @binding.meta().get key
+  set: (models, options = {}) ->
+    models = this.parse(models, options) if options.parse
+    @binding.update (v) -> v.concat imm(models)
 
-  setXhrStatus: (key, status) ->
-    if @options.trackXhrStatus
-      @setStatus key, status
+  reset: (models) ->
+    @binding.clear()
+    @set models
 
-  unsetXhrStatus: (key) ->
-    if @options.trackXhrStatus
-      @unsetStatus key
+  at: (index) ->
+    new @model @binding.sub(index)
 
-  _attrsAndOptions: (key, val, options) ->
-    # Handle both `"key", value` and `{key: value}` -style arguments.
-    # (from Backbone.Model.set)
-    attrs = {}
-    if typeof key == 'object'
-      attrs = key
-      options = val
-    else
-      attrs[key] = val
 
-    attrs: attrs
-    options: options || {}
-
+# -----------------------------------------------------------------------
 
 MoreartySync =
   SyncModel: SyncModel
+  SyncCollection: SyncCollection
 
   createContext: ({state, modelMapping, configuration}) ->
     Ctx = Morearty.createContext state, configuration
@@ -175,10 +212,20 @@ MoreartySync =
     Ctx
 
   Mixin:
-    # lazy model retrieval
-    model: (binding = @getDefaultBinding()) ->
-      ctx = @context.morearty
-      path = Binding.asStringPath binding._path
+    ###
+    Lazy model retrieval
+    @param {Binding|String} binding - binding instance or an absolute binding path
+    @param {Morearty.Context} ctx - morearty context
+    ###
+    model: (binding = @getDefaultBinding(), ctx = @context.morearty) ->
+      {binding, path} =
+        if binding instanceof Binding
+          binding: binding
+          path: Binding.asStringPath(binding._path)
+        else
+          path = binding
+          binding: ctx.getBinding().sub path
+          path: path
 
       model =
         if m = ctx._modelInstances[path]

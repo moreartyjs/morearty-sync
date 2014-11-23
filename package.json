@@ -1,13 +1,13 @@
 {
   "name": "morearty-sync",
-  "version": "0.0.1",
+  "version": "0.0.3",
   "description": "",
   "main": "index.js",
   "dependencies": {
     "backbone": "^1.1.2",
-    "immutable": "~2.5.x",
+    "immutable": "~3.2.x",
     "lodash": "^2.4.1",
-    "morearty": "0.6.x",
+    "morearty": "~0.7.x",
     "react": "~0.12.x"
   },
   "devDependencies": {
