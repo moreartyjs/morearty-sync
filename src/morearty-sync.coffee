@@ -176,11 +176,15 @@ class SyncCollection extends mixOf B.Collection, SyncMixin
 
   set: (models, options = {}) ->
     models = this.parse(models, options) if options.parse
-    @binding.update (v) -> v.concat imm(models)
+    models = imm(models);
 
-  reset: (models) ->
-    @binding.clear()
-    @binding.set models
+    if options.reset
+      @binding.set models
+    else
+      @binding.update (v) -> v.concat models
+
+  reset: (models, options) ->
+    @set models, options
 
   at: (index) ->
     new @model @binding.sub(index)
@@ -246,8 +250,8 @@ MoreartySync =
 
           ctx._modelInstances[path] = new MClass binding if MClass
 
-    collection: (binding) ->
-      @model binding
+    collection: (binding, ctx) ->
+      @model binding, ctx
 
     linkModel: (model, path, {beforeEdit, afterEdit}) ->
       beforeEdit ||= _.identity
