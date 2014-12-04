@@ -122,6 +122,7 @@ class SyncModel extends mixOf B.Model, SyncMixin
 
     @initialize.apply @, arguments
 
+  # TODO: return imm object with @binding.get(...)
   get: (key) ->
     @binding.toJS key
 
@@ -174,10 +175,16 @@ class SyncCollection extends mixOf B.Collection, SyncMixin
     @initialize.apply @, arguments
     validateModel @model, SyncModel, 'SyncCollection.model'
 
+  # TODO: try to store objects in the Map
+  get: (id) ->
+    item = @binding.get().find (x) -> x.get('id') == id
+    new @model(item) if item
+
   set: (models, options = {}) ->
     models = this.parse(models, options) if options.parse
     models = imm(models);
 
+    # TODO: add merge and delete
     if options.reset
       @binding.set models
     else
@@ -239,7 +246,7 @@ MoreartySync =
         else if matched = path.match /(.*)\.(\d+)/
           # check if path is a vector item: some.list.x
           [__, vectorPath, itemIndex] = matched
-          collection = ctx._modelMap[vectorPath]
+          collection = ctx._modelInstances[vectorPath]
           model = collection?.at itemIndex
         else
           # check in regexps
